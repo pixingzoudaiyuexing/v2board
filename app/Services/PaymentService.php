@@ -47,7 +47,9 @@ class PaymentService
 
         return $this->payment->pay([
             'notify_url' => $notifyUrl,
-            'return_url' => url('/#/order/' . $order['trade_no']),
+            // 生产环境支付完成页自定义：支付平台完成同步跳转后，用户浏览器统一进入既有完成页。
+            // 此处只替换 return_url，不影响 notify_url、异步回调、交易验证或订单状态确认；后续同步 wyx2685/v2board 时需确认支付参数结构变化后该 return_url 仍被正确传递。
+            'return_url' => 'https://paycompleted.pages.dev/',
             'trade_no' => $order['trade_no'],
             'total_amount' => $order['total_amount'],
             'user_id' => $order['user_id'],
