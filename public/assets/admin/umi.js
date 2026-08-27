@@ -106033,6 +106033,31 @@
                     }
                 })
             }
+            supportsAcceptProxyProtocol() {
+                return ["vless", "vmess", "trojan", "shadowsocks", "anytls"].includes(this.state.server.protocol)
+            }
+            getAcceptProxyProtocol() {
+                var e = this.state.server.network_settings;
+                if ("string" === typeof e)
+                    try {
+                        e = JSON.parse(e)
+                    } catch (t) {
+                        return !1
+                    }
+                return !!(e && e.acceptProxyProtocol)
+            }
+            setAcceptProxyProtocol(e) {
+                var t = this.state.server.network_settings;
+                if ("string" === typeof t)
+                    try {
+                        t = JSON.parse(t)
+                    } catch (n) {
+                        t = {}
+                    }
+                this.formChange("network_settings", I()({}, t || {}, {
+                    acceptProxyProtocol: e
+                }))
+            }
             showChildDrawer(e, t) {
                 this.setState({
                     childDrawer: I()({},
@@ -106392,7 +106417,14 @@
                     value: "httpupgrade"
                 }, "HTTPUpgrade"), e.protocol != "trojan" && y.a.createElement(N["a"].Option, {
                     value: "xhttp"
-                }, "XHTTP")))), y.a.createElement("div", {
+                }, "XHTTP")))), this.supportsAcceptProxyProtocol() && y.a.createElement("div", {
+                    className: "form-group"
+                }, y.a.createElement("label", null, "\u63a5\u53d7\u4e0a\u6e38 Proxy Protocol"), y.a.createElement("div", null, y.a.createElement(f["a"], {
+                    checked: this.getAcceptProxyProtocol(),
+                    onChange: e=>this.setAcceptProxyProtocol(e)
+                })), y.a.createElement("small", {
+                    className: "form-text text-muted"
+                }, "\u7528\u4e8e\u524d\u7f6e Nginx\u3001HAProxy \u6216\u4e2d\u8f6c\u673a\u4f20\u9012\u771f\u5b9e\u5ba2\u6237\u7aef IP\u3002\u4ec5\u5728\u4e0a\u6e38\u5b9e\u9645\u53d1\u9001 Proxy Protocol \u65f6\u5f00\u542f\u3002")), y.a.createElement("div", {
                     className: "form-group"
                 }, e.network != null && (e.network == "xhttp" || e.network == "ws" || e.network == "grpc") && y.a.createElement("label", null, "\u4fe1\u4efb\u7684XFF\u5934\u90e8(\u83b7\u53d6\u771f\u5b9eIP)"), y.a.createElement(N["a"], {
                     mode: "tags",
