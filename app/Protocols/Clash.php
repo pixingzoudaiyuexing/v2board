@@ -22,7 +22,8 @@ class Clash
         $servers = $this->servers;
         $user = $this->user;
         $appName = config('v2board.app_name', 'V2Board');
-        header("subscription-userinfo: upload={$user['u']}; download={$user['d']}; total={$user['transfer_enable']}; expire={$user['expired_at']}");
+        // 生产环境订阅展示自定义：Clash 系客户端会把 subscription-userinfo 显示为套餐流量和到期信息，因此此处刻意不发送该响应头。
+        // 此改动仅影响客户端展示，不改变节点生成、服务端流量统计、套餐限制或到期判断；后续同步 wyx2685/v2board 时应确认响应头生成位置变化后仍仅作用于 Clash 系订阅。
         header('profile-update-interval: 24');
         header("content-disposition:attachment;filename*=UTF-8''".rawurlencode($appName));
         header("profile-web-page-url:" . config('v2board.app_url'));
