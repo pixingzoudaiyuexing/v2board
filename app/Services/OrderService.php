@@ -6,6 +6,7 @@ use App\Jobs\OrderHandleJob;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class OrderService
@@ -257,11 +258,20 @@ class OrderService
     public function paid(string $callbackNo)
     {
         $order = $this->order;
-        if ($order->status !== 0) return true;
+        $paidAt = Carbon::now()->getTimestamp();
+        $affected = Order::where('id', $order->id)
+            ->where('status', 0)
+            ->where('created_at', '>', $paidAt - Order::PENDING_TTL_SECONDS)
+            ->update([
+                'status' => 1,
+                'paid_at' => $paidAt,
+                'callback_no' => $callbackNo
+            ]);
+        if ($affected !== 1) return false;
+
         $order->status = 1;
-        $order->paid_at = time();
+        $order->paid_at = $paidAt;
         $order->callback_no = $callbackNo;
-        if (!$order->save()) return false;
         try {
             OrderHandleJob::dispatch($order->trade_no);
         } catch (\Exception $e) {

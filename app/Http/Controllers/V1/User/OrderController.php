@@ -14,6 +14,7 @@ use App\Services\PaymentService;
 use App\Services\PlanService;
 use App\Services\UserService;
 use App\Utils\Helper;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -27,6 +28,9 @@ class OrderController extends Controller
             $model->where('status', $request->input('status'));
         }
         $order = $model->get();
+        foreach ($order as $item) {
+            $item->append('expires_at');
+        }
         $plan = Plan::get();
         for ($i = 0; $i < count($order); $i++) {
             for ($x = 0; $x < count($plan); $x++) {
@@ -48,6 +52,7 @@ class OrderController extends Controller
         if (!$order) {
             abort(500, __('Order does not exist or has been paid'));
         }
+        $order->append('expires_at');
         if ($order->plan_id == 0) {
             $order['plan'] = [
                 'id' => 0,
@@ -214,6 +219,9 @@ class OrderController extends Controller
             ->first();
         if (!$order) {
             abort(500, __('Order does not exist or has been paid'));
+        }
+        if ($order->isExpiredAt(Carbon::now()->getTimestamp())) {
+            abort(500, __('Order has expired'));
         }
         // free process
         if ($order->total_amount <= 0) {

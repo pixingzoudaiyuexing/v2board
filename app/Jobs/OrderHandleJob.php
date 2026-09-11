@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Order;
 use App\Services\OrderService;
+use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -43,7 +44,7 @@ class OrderHandleJob implements ShouldQueue
         $orderService = new OrderService($order);
         switch ($order->status) {
             case 0:
-                if ($order->created_at <= (time() - 3600 * 2)) {
+                if ($order->isExpiredAt(Carbon::now()->getTimestamp())) {
                     $orderService->cancel();
                 }
                 break;

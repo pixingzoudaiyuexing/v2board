@@ -7,7 +7,9 @@ use App\Models\Order;
 use App\Services\OrderService;
 use App\Services\PaymentService;
 use App\Services\TelegramService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class PaymentController extends Controller
 {
@@ -28,14 +30,30 @@ class PaymentController extends Controller
 
     private function handle($tradeNo, $callbackNo)
     {
+        $receivedAt = Carbon::now()->getTimestamp();
         $order = Order::where('trade_no', $tradeNo)->first();
         if (!$order) {
             abort(500, 'order is not found');
         }
         if ($order->status !== 0) return true;
+        if ($order->isExpiredAt($receivedAt)) {
+            $this->logLatePayment($order, $callbackNo, $receivedAt);
+            return true;
+        }
         $orderService = new OrderService($order);
         if (!$orderService->paid($callbackNo)) {
-            return false;
+            // paid() mutates this instance only after this call wins the transition.
+            if ($order->status === 1) return false;
+            $currentOrder = $order->fresh();
+            if (!$currentOrder) return false;
+            if (
+                $currentOrder->status === 0 &&
+                $currentOrder->isExpiredAt(Carbon::now()->getTimestamp())
+            ) {
+                $this->logLatePayment($currentOrder, $callbackNo, $receivedAt);
+                return true;
+            }
+            return $currentOrder->status !== 0;
         }
         $telegramService = new TelegramService();
         $message = sprintf(
@@ -45,5 +63,16 @@ class PaymentController extends Controller
         );
         $telegramService->sendMessageWithAdmin($message);
         return true;
+    }
+
+    private function logLatePayment(Order $order, $callbackNo, int $receivedAt): void
+    {
+        Log::channel('daily')->error('LATE_PAYMENT_EXPIRED_ORDER', [
+            'trade_no' => $order->trade_no,
+            'callback_no' => (string)$callbackNo,
+            'order_id' => (int)$order->id,
+            'expires_at' => $order->expires_at,
+            'received_at' => $receivedAt
+        ]);
     }
 }
