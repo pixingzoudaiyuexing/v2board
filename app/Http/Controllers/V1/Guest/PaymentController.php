@@ -35,9 +35,15 @@ class PaymentController extends Controller
         if (!$order) {
             abort(500, 'order is not found');
         }
+        if ($this->logCancelledPayment($order, $callbackNo, $receivedAt)) return true;
         if ($order->status !== 0) return true;
         if ($order->isExpiredAt($receivedAt)) {
-            $this->logLatePayment($order, $callbackNo, $receivedAt);
+            $this->logPaymentAnomaly(
+                'LATE_PAYMENT_EXPIRED_ORDER',
+                $order,
+                $callbackNo,
+                $receivedAt
+            );
             return true;
         }
         $orderService = new OrderService($order);
@@ -46,11 +52,21 @@ class PaymentController extends Controller
             if ($order->status === 1) return false;
             $currentOrder = $order->fresh();
             if (!$currentOrder) return false;
+            if ($this->logCancelledPayment(
+                $currentOrder,
+                $callbackNo,
+                $receivedAt
+            )) return true;
             if (
                 $currentOrder->status === 0 &&
                 $currentOrder->isExpiredAt(Carbon::now()->getTimestamp())
             ) {
-                $this->logLatePayment($currentOrder, $callbackNo, $receivedAt);
+                $this->logPaymentAnomaly(
+                    'LATE_PAYMENT_EXPIRED_ORDER',
+                    $currentOrder,
+                    $callbackNo,
+                    $receivedAt
+                );
                 return true;
             }
             return $currentOrder->status !== 0;
@@ -65,9 +81,27 @@ class PaymentController extends Controller
         return true;
     }
 
-    private function logLatePayment(Order $order, $callbackNo, int $receivedAt): void
-    {
-        Log::channel('daily')->error('LATE_PAYMENT_EXPIRED_ORDER', [
+    private function logCancelledPayment(
+        Order $order,
+        $callbackNo,
+        int $receivedAt
+    ): bool {
+        if ($order->status !== 2) return false;
+
+        $event = $order->isExpiredAt($receivedAt)
+            ? 'LATE_PAYMENT_EXPIRED_ORDER'
+            : 'PAYMENT_RECEIVED_FOR_CANCELLED_ORDER';
+        $this->logPaymentAnomaly($event, $order, $callbackNo, $receivedAt);
+        return true;
+    }
+
+    private function logPaymentAnomaly(
+        string $event,
+        Order $order,
+        $callbackNo,
+        int $receivedAt
+    ): void {
+        Log::channel('daily')->error($event, [
             'trade_no' => $order->trade_no,
             'callback_no' => (string)$callbackNo,
             'order_id' => (int)$order->id,

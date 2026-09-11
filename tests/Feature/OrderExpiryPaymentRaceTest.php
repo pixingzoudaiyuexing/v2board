@@ -265,6 +265,7 @@ class OrderExpiryPaymentRaceTest extends TestCase
     public function testDuplicateCallbackDoesNotDispatchOrNotifyTwice(): void
     {
         Queue::fake();
+        Log::shouldReceive('channel')->never();
         $this->makeUser([
             'is_admin' => 1,
             'telegram_id' => 123456,
@@ -279,36 +280,124 @@ class OrderExpiryPaymentRaceTest extends TestCase
         Queue::assertPushed(SendTelegramJob::class, 1);
     }
 
-    public function testCancelledOrderCallbackReturnsSuccessWithoutRecoveryOrTelegram(): void
+    public function testExpiredCancelledOrderCallbackLogsLatePaymentAndReturnsSuccess(): void
     {
         Queue::fake();
         $order = $this->makeOrder([
-            'created_at' => self::NOW - 100,
+            'created_at' => self::NOW - 7200,
             'status' => 2,
         ]);
+        $this->expectPaymentAnomalyLog(
+            'LATE_PAYMENT_EXPIRED_ORDER',
+            $order,
+            'cancelled-callback-1'
+        );
 
-        $this->assertTrue(
-            $this->invokePaymentHandle(new PaymentController(), $order, 'callback-1')
+        $this->assertSame(
+            'PROVIDER_OK',
+            $this->notifyPaymentCallback($order, 'cancelled-callback-1')
         );
 
         $this->assertSame(2, $order->fresh()->status);
         Queue::assertNothingPushed();
     }
 
-    public function testWinningCallbackStillFailsWhenActivationDispatchFails(): void
+    public function testActiveCancelledOrderCallbackLogsAnomalyAndReturnsSuccess(): void
+    {
+        Queue::fake();
+        $order = $this->makeOrder([
+            'created_at' => self::NOW - 7199,
+            'status' => 2,
+        ]);
+        $this->expectPaymentAnomalyLog(
+            'PAYMENT_RECEIVED_FOR_CANCELLED_ORDER',
+            $order,
+            'cancelled-callback-2'
+        );
+
+        $this->assertSame(
+            'PROVIDER_OK',
+            $this->notifyPaymentCallback($order, 'cancelled-callback-2')
+        );
+
+        $this->assertSame(2, $order->fresh()->status);
+        Queue::assertNothingPushed();
+    }
+
+    public function testConcurrentCancelDuringCallbackStillLogsAnomaly(): void
+    {
+        Queue::fake();
+        $order = $this->makeOrder(['created_at' => self::NOW - 7199]);
+        $this->expectPaymentAnomalyLog(
+            'PAYMENT_RECEIVED_FOR_CANCELLED_ORDER',
+            $order,
+            'cancelled-race-callback'
+        );
+        $cancelled = false;
+        Order::retrieved(function (Order $retrieved) use (&$cancelled, $order) {
+            if (!$cancelled && $retrieved->id === $order->id) {
+                $cancelled = true;
+                Order::where('id', $order->id)
+                    ->where('status', 0)
+                    ->update(['status' => 2]);
+            }
+        });
+
+        try {
+            $this->assertSame(
+                'PROVIDER_OK',
+                $this->notifyPaymentCallback($order, 'cancelled-race-callback')
+            );
+        } finally {
+            Order::flushEventListeners();
+        }
+
+        $this->assertSame(2, $order->fresh()->status);
+        Queue::assertNothingPushed();
+    }
+
+    public function testCompletedDuplicateCallbackHasNoAnomalyOrTelegram(): void
+    {
+        Queue::fake();
+        Log::shouldReceive('channel')->never();
+        $order = $this->makeOrder([
+            'created_at' => self::NOW - 7200,
+            'status' => 3,
+        ]);
+
+        $this->assertSame(
+            'PROVIDER_OK',
+            $this->notifyPaymentCallback($order, 'completed-callback-1')
+        );
+
+        $this->assertSame(3, $order->fresh()->status);
+        Queue::assertNothingPushed();
+    }
+
+    public function testDispatchFailureLeavesPaidOrderRecoverableByScheduler(): void
     {
         $dispatcher = Mockery::mock(BusDispatcher::class);
         $dispatcher->shouldReceive('dispatch')
             ->once()
             ->andThrow(new \RuntimeException('dispatch failed'));
         $this->app->instance(BusDispatcher::class, $dispatcher);
-        $order = $this->makeOrder(['created_at' => self::NOW - 7199]);
+        $user = $this->makeUser(['balance' => 10]);
+        $order = $this->makeOrder([
+            'user_id' => $user->id,
+            'type' => 9,
+            'created_at' => self::NOW - 7199,
+            'total_amount' => 100,
+        ]);
 
         $this->assertFalse(
             $this->invokePaymentHandle(new PaymentController(), $order, 'callback-1')
         );
-
         $this->assertSame(1, $order->fresh()->status);
+
+        (new OrderHandleJob($order->trade_no))->handle();
+
+        $this->assertSame(3, $order->fresh()->status);
+        $this->assertSame(110, $user->fresh()->balance);
     }
 
     public function testCancelWinPreventsPaidActivationAndRefundsBalanceOnce(): void
@@ -509,6 +598,45 @@ class OrderExpiryPaymentRaceTest extends TestCase
             'method' => $paymentId,
             'user' => ['id' => $order->user_id],
         ]);
+    }
+
+    private function expectPaymentAnomalyLog(
+        string $event,
+        Order $order,
+        string $callbackNo
+    ): void {
+        Log::shouldReceive('channel')
+            ->once()
+            ->with('daily')
+            ->andReturnSelf();
+        Log::shouldReceive('error')
+            ->once()
+            ->with($event, [
+                'trade_no' => $order->trade_no,
+                'callback_no' => $callbackNo,
+                'order_id' => $order->id,
+                'expires_at' => $order->expires_at,
+                'received_at' => self::NOW,
+            ]);
+    }
+
+    private function notifyPaymentCallback(Order $order, string $callbackNo)
+    {
+        $payment = $this->makePayment();
+        $request = Request::create('/api/v1/guest/payment/notify', 'POST', [
+            'trade_no' => $order->trade_no,
+            'callback_no' => $callbackNo,
+            'merchant_key' => 'must-not-be-logged',
+            'signature' => 'must-not-be-logged',
+            'payment_url' => 'must-not-be-logged',
+            'qr_payload' => 'must-not-be-logged',
+        ]);
+
+        return (new PaymentController())->notify(
+            'OrderExpiryTestPayment',
+            $payment->uuid,
+            $request
+        );
     }
 
     private function invokePaymentHandle(

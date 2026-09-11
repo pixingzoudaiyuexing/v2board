@@ -25,3 +25,9 @@ write `LATE_PAYMENT_EXPIRED_ORDER` to the `daily` log channel with order and
 callback identifiers plus expiry/receipt timestamps. Full callback parameters,
 credentials, signatures, payment URLs, and QR payloads are not logged. Late
 payments require manual refund or compensation review.
+
+Callbacks for a cancelled order follow the same no-recovery policy and return
+provider success. Expired cancelled orders use `LATE_PAYMENT_EXPIRED_ORDER`;
+cancelled orders that have not reached the deadline use
+`PAYMENT_RECEIVED_FOR_CANCELLED_ORDER`. Duplicate callbacks for paid or
+completed orders remain silent and do not send another success notification.
