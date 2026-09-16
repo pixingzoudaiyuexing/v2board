@@ -2,11 +2,19 @@
 
 namespace App\Services;
 
+use DomainException;
 use InvalidArgumentException;
 
 class SubscriptionEntryService
 {
     public function entries(): array
+    {
+        return array_map(function ($url) {
+            return ['base_url' => $url];
+        }, $this->canonicalBaseUrls());
+    }
+
+    public function canonicalBaseUrls(): array
     {
         $configured = config('v2board.subscribe_url');
         if ($configured === null || $configured === '') {
@@ -36,10 +44,20 @@ class SubscriptionEntryService
 
             if (!isset($seen[$url])) {
                 $seen[$url] = true;
-                $entries[] = ['base_url' => $url];
+                $entries[] = $url;
             }
         }
 
         return $entries;
+    }
+
+    public function resolveSelectedBase($selectedBase): string
+    {
+        if (!is_string($selectedBase)
+            || !in_array($selectedBase, $this->canonicalBaseUrls(), true)) {
+            throw new DomainException('Selected subscription entry is invalid');
+        }
+
+        return $selectedBase;
     }
 }

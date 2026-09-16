@@ -99,13 +99,24 @@ class Helper
 
     public static function getSubscribeUrl($token)
     {
+        $subscribeUrls = explode(',', config('v2board.subscribe_url'));
+        $subscribeUrl = $subscribeUrls[rand(0, count($subscribeUrls) - 1)];
+
+        return self::buildSubscribeUrl($token, $subscribeUrl);
+    }
+
+    public static function getSubscribeUrlForBase($token, $subscribeUrl)
+    {
+        return self::buildSubscribeUrl($token, $subscribeUrl);
+    }
+
+    private static function buildSubscribeUrl($token, $subscribeUrl)
+    {
         $submethod = (int)config('v2board.show_subscribe_method', 0);
         $path = config('v2board.subscribe_path', '/api/v1/client/subscribe');
         if (empty($path)) {
             $path = '/api/v1/client/subscribe';
-        } 
-        $subscribeUrls = explode(',', config('v2board.subscribe_url'));
-        $subscribeUrl = $subscribeUrls[rand(0, count($subscribeUrls) - 1)];
+        }
         switch ($submethod) {
             case 0:
                 $path = "{$path}?token={$token}";
