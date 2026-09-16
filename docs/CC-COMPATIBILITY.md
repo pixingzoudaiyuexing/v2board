@@ -31,3 +31,34 @@ The parser splits on commas, trims each component, skips empty components, and r
 5. Re-run all compatibility and regression tests.
 6. Re-run independent security/minimal-patch review.
 7. Update the upstream base SHA and patch commit reference.
+
+## VB-CF02-002 - Generate Subscription URL for Selected Entry
+
+- Purpose: generate the official current-user subscription URL for one exact selected canonical entry.
+- Dependency chain: VB-CF02-001 provides canonical entry discovery; VB-CF02-002 provides official credential URL generation for one exact validated canonical entry.
+- Reason: VB-CF02-001 alone does not identify which base was selected by the existing random full URL. Prefix matching is ambiguous when entries overlap, such as `https://x.example.com` and `https://x.example.com/p`, and the official random Helper path retains raw comma-separated whitespace while VB-CF02-001 returns trimmed canonical entries.
+- Route and method: `POST /api/v1/user/getSubscribeForEntry`.
+- Authentication: existing V2Board `user` middleware with existing `authorization` / `auth_data`; no new credential or eligibility policy.
+- Request: JSON or URL-encoded form body containing only the selection identity, for example `{"base_url":"https://x.example.com/p"}`. The original untrimmed body value must exactly equal a current canonical entry.
+- Success response: `{"data":{"subscribe_url":"https://x.example.com/p/api/v1/client/subscribe?token=..."}}`. No separate token, OTP, HMAC, path, Admin data, user model, or other configuration is returned.
+- Selection error: missing, non-string, unknown, stale, case-different, whitespace-different, or prefix-only values return HTTP 422 with `{"message":"Selected subscription entry is invalid"}`. Submitted values are not echoed and there is no fallback.
+- Configuration error: any invalid non-empty configured entry returns HTTP 500 with `{"message":"Subscription entry configuration is invalid"}`, preserving VB-CF02-001 fail-closed behavior without exposing the configured value.
+- Exact membership and parser sharing: `SubscriptionEntryService::canonicalBaseUrls()` is the sole trim, validation, duplicate-removal, and ordering parser. Both compatibility endpoints use it; selected entries use strict string equality only.
+- Credential single source: `Helper::buildSubscribeUrl()` is the sole implementation of `subscribe_path`, normal token, OTP cache/lifetime, and time-based HMAC behavior. Existing `getSubscribeUrl()` retains raw `explode` plus random selection and passes that raw value to the builder. `getSubscribeUrlForBase()` passes the already validated canonical base to the same builder.
+- Backward compatibility: the existing `/api/v1/user/getSubscribe` controller is unchanged. Historical random selection and raw whitespace behavior are intentionally preserved; the old path does not use the canonical parser.
+- Network boundary: the selected base is only concatenated into the returned URL. The compatibility path performs no HTTP request, DNS lookup, redirect, proxy, socket, or filesystem operation against it.
+- CC master/base SHA before patch: `fc9a47a1f5571188a8ca4542d7304d3457a905da`.
+- Official upstream: `wyx2685/v2board` at `99f8526eddb72a4e8f6cbccd58cc0656bb91fe88`.
+- Implementation commit: `851fabf222f5b60ff265b880de61dac4b908d3ad`.
+- Modified files: `app/Utils/Helper.php`, `app/Services/SubscriptionEntryService.php`, `app/Http/Controllers/V1/User/SubscriptionEntryController.php`, `app/Http/Routes/V1/UserRoute.php`, `tests/Feature/SubscriptionEntryTest.php`, and `docs/CC-COMPATIBILITY.md`.
+- Tests: authentication and exact request/response boundaries; JSON and form identity preservation; single/multiple/path/port/trailing-slash/duplicate entries; prefix overlap; stale and arbitrary selections; invalid configuration; all three credential modes; default/custom path; VB-CF02-001 stability; historical random/raw-whitespace behavior; existing `getSubscribe` endpoint.
+
+### VB-CF02-002 upgrade procedure
+
+1. Fetch the new official upstream and determine whether it provides both canonical complete-entry discovery and exact selected-entry credential generation.
+2. If equivalent official capabilities exist, evaluate retiring VB-CF02-001 and VB-CF02-002 together without changing public behavior prematurely.
+3. Otherwise rebase/reapply both patches in dependency order: VB-CF02-001, then VB-CF02-002.
+4. Verify that the upstream credential implementation has not changed before retaining or adapting the shared builder refactor.
+5. Re-run canonical-parser, selection, all credential-mode, old random/raw-whitespace, endpoint, security, and full regression tests.
+6. Re-run independent security, credential-single-source, backward-compatibility, minimal-patch, upgradeability, and contract review.
+7. Update the upstream/base and implementation commit references.
